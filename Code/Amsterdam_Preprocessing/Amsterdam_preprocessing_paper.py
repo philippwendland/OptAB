@@ -207,7 +207,7 @@ lab_df_amsterdam.to_csv('/work/wendland/Amsterdamdata/lab_amsterdam_mimicvars.cs
 
 ##### Preprocessing with utils script
 
-import utils_adapted as u
+import utils_paper as u
 
 
 sofa_score = pd.read_csv('/work/wendland/Amsterdamdata/sofa_score_hourly.csv')
@@ -292,7 +292,7 @@ sofa_amsterdam = sofa_score
 
 admission_data=patient_df
 
-tensor, key_dict, variables_tensor, variables_complete, complete_stay_list, static_tensor, static_variables, fit, variables_mean, variables_std, static_mean, static_std, indices_train, indices_test=u.multiple_patients_predictions_tensor(min_pred=0,max_pred=None, pred_times_in_h=1,lab_df=lab_df,thresh=None, sep_data=sepsis3, round_time=False, round_nearest=True, round_minutes=60, aggregate_startvalues=True, start_hours=1, remove_unaggregated_values=True, start_timepoint='sepsis_icu', lab_demo=None,print_=True,list_of_hadms=onlythree, just_icu=None,icustays=None,stays_list=onlythree, variables=variables_amsterdam, missing_imputation_start=True, antibiotics=pat_onlythree2,remove_noant=True, static=admission_data, static_time=False, standardize=True, train_test_split=False, seed=0,antibiotics_variables=antibiotics_variables,binary_antibiotics=True,static_bin_ant=True, cut = 'antibiotics', variables_mean_pre=variables_mean_pre, variables_std_pre=variables_std_pre, static_mean_pre=static_mean_pre, static_std_pre=static_std_pre, fit = imputer, dataset = 'amsterdamumcdb', sofa_amsterdam = sofa_score)
+tensor, key_dict, variables_tensor, variables_complete, complete_stay_list, static_tensor, static_variables, fit, variables_mean, variables_std, static_mean, static_std, indices_train, indices_test=u.multiple_patients_predictions_tensor(min_pred=0,max_pred=None, pred_times_in_h=1,lab_df=lab_df,thresh=None, sep_data=sepsis3, round_time=False, round_nearest=True, round_minutes=60, aggregate_startvalues=True, start_hours=1, remove_unaggregated_values=True, start_timepoint='sepsis_icu', lab_demo=None,print_=True,list_of_hadms=onlythree, just_icu=None,icustays=None,stays_list=onlythree, variables=variables_amsterdam, missing_imputation_start=True, antibiotics=pat_onlythree2,remove_noant=True, static=admission_data, static_time=False, standardize=True, train_test_split=False, seed=0,antibiotics_variables=antibiotics_variables,binary_antibiotics=True,static_bin_ant=True, cut = 'antibiotics', variables_mean_pre=variables_mean_pre, variables_std_pre=variables_std_pre, static_mean_pre=static_mean_pre, static_std_pre=static_std_pre, fit = imputer, dataset = 'amsterdamumcdb', sofa_amsterdam = sofa_score, timetype=timetype)
 
 # tensor: Tensor containing all dynamic variables (including time on the first channel, antibiotics, and missing masks) for OptAB, size: batch x timepoints x variables
 # key_dict: Dictionary mapping time index to time in hours (here 1 index = 1 hour, therefore not necessary)
