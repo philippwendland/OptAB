@@ -39,7 +39,7 @@ static_mean=pd.read_pickle('/work/wendland/opt_treat/sepsis_all_1_static_mean.pk
     
 static_std=pd.read_pickle('/work/wendland/opt_treat/sepsis_all_1_static_std.pkl')
 
-
+microbiol_fungal = pd.read_pickle('/work/wendland/opt_treat/microbiol_fungal_dat_.pkl')
 
 # hyperparameters of the Encoder
 hidden_channels = 17
@@ -130,6 +130,7 @@ data_static_test=static_tensor[indices_test].to(model.device,dtype=torch.float32
 
 creat_dat_test = [creat_dat[i] for i in indices_test]
 microbiol_dat_test = [microbiol_dat[i] for i in indices_test]
+microbiol_fungal_test = [microbiol_fungal[i] for i in indices_test]
 
 # List of all Antibiotic combinations
 treatment_options_string = list(powerset(['Vancomycin','Piperacillin-Tazobactam','Ceftriaxon']))[1:-1]
@@ -187,6 +188,9 @@ violated_tensors_list_all=[]
 # Nested list including predictions of all solutions violating side-effects associated thresholds of all treatment optimizations of all patients 
 # size: number of patients (number of patient specific treatment optimizations (Torch Tensor, size: number of solutions x 1 x timepoints until next iteration x number of outcomes))
 
+microbiol_fungal_viral_list=[]
+# Nested list including information about microbiological results indicating fungal and viral infections
+
 # Loop over all patients
 for k in range(data_X_test.shape[0]):
     
@@ -201,6 +205,7 @@ for k in range(data_X_test.shape[0]):
     best_treat_int_list_k=[]
     opt_time_list_k=[] 
     best_pred_list_k=[]
+    microbiol_fungal_viral_list_k=[]
     
     violated_sol_list_k=[]
     violated_tensors_list_k=[]
@@ -253,6 +258,13 @@ for k in range(data_X_test.shape[0]):
         # Microbiological data for patient k
         microbiol_dat_k = microbiol_dat_test[k]
         microbiol_dat_start_pred=microbiol_dat_k[(microbiol_dat_k['storetime']<=start_pred) & (microbiol_dat_k['storetime']>-microbiol_time)]
+        
+        microbiol_fungal_k = microbiol_fungal_test[k]
+        microbiol_fungal_start_pred=microbiol_fungal_k[(microbiol_fungal_k['storetime']<=start_pred) & (microbiol_fungal_k['storetime']>-microbiol_time)]
+        # Print information about fungal and viral pathogens!
+        if len(microbiol_fungal_start_pred)>0:
+            print(microbiol_fungal_start_pred)
+        
         
         # if first optimization timepoint, prediction horizon is 48 hours (due to guidelines)
         if first:
@@ -425,6 +437,8 @@ for k in range(data_X_test.shape[0]):
             violated_tensors=[]
         violated_sol_list_k.append(violated_sol)
         violated_tensors_list_k.append(violated_tensors)
+        microbiol_fungal_viral_list_k.append(microbiol_fungal_start_pred)
+        
         
         feasible_sol = []
         feasible_res = []
@@ -670,6 +684,9 @@ for k in range(data_X_test.shape[0]):
     
     violated_sol_list_all.append(violated_sol_list_k)
     violated_tensors_list_all.append(violated_tensors_list_k)
+    
+    microbiol_fungal_viral_list.append(microbiol_fungal_viral_list_k)
+    
 
 with open('/work/wendland/opt_treat/feasible_sol_list_all_corrected.pkl', 'wb') as handle:
     pickle.dump(feasible_sol_list_all, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -701,7 +718,8 @@ with open('/work/wendland/opt_treat/violated_sol_list_all_corrected.pkl', 'wb') 
 with open('/work/wendland/opt_treat/violated_tensors_list_all_corrected.pkl', 'wb') as handle:
     pickle.dump(violated_tensors_list_all, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    
+with open('/work/wendland/opt_treat/microbiol_fungal_list_all.pkl', 'wb') as handle:
+    pickle.dump(microbiol_fungal_viral_list, handle, protocol=pickle.HIGHEST_PROTOCOL)    
 
 # Counting all patients with violated side-effects associated thresholds
 creat_viol_tp_list = []
