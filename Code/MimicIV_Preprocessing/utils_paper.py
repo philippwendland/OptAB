@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import numpy as np
 import torch
 import time
@@ -331,6 +331,25 @@ dilution_text, dilution_comparison, dilution_value, interpretation
 
     FROM mimiciv_hosp.microbiologyevents as all_mb
     WHERE interpretation = 'S' or interpretation='R' or interpretation='I' or interpretation='P')
+    SELECT * FROM mb'''
+    
+    include_subject_id = tuple(Patients["patient_id"].to_list())
+    #curtime = time.time()
+    print('loading {}'.format(mb_sql),end='...')
+    mb = pd.read_sql_query(mb_sql +' WHERE subject_id IN {}'.format(include_subject_id), cnx).drop_duplicates().reset_index(drop=True)
+    #data = pd.read_sql_query(table,cnx).drop_duplicates().reset_index(drop=True)
+    
+    return mb
+
+def load_microbiologyevents_all(Patients=None,cnx=None):
+    ### SQL QUREIES TO GENERATE THE MIMINIMAL SEPSIS DATA MODEL AND MIMIC GENERATED SOFA, SOI, SOFA, AND SEPSIS DETERMINATIONS TO CHECK AGAINST
+    
+    mb_sql ='''WITH mb AS (SELECT
+    subject_id, hadm_id, charttime, spec_itemid, spec_type_desc, storetime,
+test_itemid, test_name, org_itemid, org_name, ab_itemid, ab_name,
+dilution_text, dilution_comparison, dilution_value, interpretation
+
+    FROM mimiciv_hosp.microbiologyevents as all_mb)
     SELECT * FROM mb'''
     
     include_subject_id = tuple(Patients["patient_id"].to_list())
@@ -1709,7 +1728,7 @@ def round_nearest_func(x, a):
 def fill_forward(x, max_length):
     return torch.cat([x, x[-1].unsqueeze(0).expand(max_length - x.size(0), x.size(1))])
 
-def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time=False, round_nearest=True, round_minutes=15, aggregate_startvalues=False, remove_unaggregated_values=False, max_time=None, start_hours=None, timetype="time_measured", start_timepoint='sepsis', missing_mask=True, sep_data=None, lab_demo=None, variables=None, just_icu=False, icustays=None,stay=None, antibiotics=None, remove_noant=False,antibiotics_variables=None,binary_antibiotics=False,static_bin_ant=False, dataset='mimic-iv',cut='antibiotics',sofa_amsterdam=None):
+def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time=False, round_nearest=True, round_minutes=15, aggregate_startvalues=False, remove_unaggregated_values=False, max_time=None, start_hours=None, timetype="time_measured", start_timepoint='sepsis', missing_mask=True, sep_data=None, lab_demo=None, variables=None, just_icu=False, icustays=None,stay=None, antibiotics=None, remove_noant=False,antibiotics_variables=None,binary_antibiotics=False,static_bin_ant=False):
     # description of the variables see multiple_patients_predictions_tensor
     
     lab_df2=lab_df.groupby("label")["hadm_id"].nunique()
@@ -1723,7 +1742,7 @@ def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time
     #selecting hadm_i
         hadm_id = np.sort(sep_data["encounter_id"].unique().astype(int))[index]
 
-    if stay is not None and dataset=='mimic-iv':
+    if stay is not None:
         hadm_id = icustays[icustays["stay_id"]==stay[0]]["hadm_id"].iloc[0]    
     
     #all laboratory values of one hadm_id
@@ -1738,87 +1757,51 @@ def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time
     lab_hadm=lab_hadm.sort_values(by=timetype)
     
     if just_icu:
-        if stay is not None and dataset=='mimic-iv':
+        if stay is not None:
             icu_hadm=icustays[icustays["stay_id"].isin(stay)]
-        elif dataset=='mimic-iv':
+        else:
             icu_hadm=icustays[icustays["hadm_id"]==hadm_id]
-        if dataset=='mimic-iv':
-            lab_hadm=lab_hadm[(lab_hadm["time_measured"]>(min(icu_hadm["icu_intime"])-np.timedelta64(int(start_hours*60),'m'))) & (lab_hadm["time_measured"]<max(icu_hadm["icu_outtime"]))]# & (lab_hadm["time_measured"]<max(icu_hadm["dischtime"]))]
+        lab_hadm=lab_hadm[(lab_hadm["time_measured"]>(min(icu_hadm["icu_intime"])-np.timedelta64(int(start_hours*60),'m'))) & (lab_hadm["time_measured"]<max(icu_hadm["icu_outtime"]))]# & (lab_hadm["time_measured"]<max(icu_hadm["dischtime"]))]
     
-    if dataset=='mimic-iv':
-        if start_timepoint=='sepsis':
-            start = pd.to_datetime(sep_data[sep_data["encounter_id"].astype("int64")==hadm_id]["Sepsis_Time"].values,utc=False)[0]
-        elif start_timepoint=='sepsis_icu':
-            start = max(pd.to_datetime(sep_data[sep_data["encounter_id"].astype("int64")==hadm_id]["Sepsis_Time"].values,utc=False)[0],min(lab_hadm[lab_hadm["label"]=='SOFA']["time_measured"]))
-        elif start_timepoint=="icu":
-            if stay is None:
-                start = min(lab_demo["icu_intime"][lab_demo["hadm_id"]==hadm_id])
-            else:
-                start = min(icu_hadm["icu_intime"])
-        elif start_timepoint=='admission':
-            start = min(lab_demo["admittime"][lab_demo["hadm_id"]==hadm_id])
-    elif dataset=='amsterdamumcdb':
-        if start_timepoint=='sepsis':
-            start = int(sep_data[sep_data['admissionid']==hadm_id][timetype])
-        elif start_timepoint=='sepsis_icu':
-            start = max(int(sep_data[sep_data['admissionid']==hadm_id][timetype]),0)
-        elif start_timepoint=="icu":
-            start = 0
+    if start_timepoint=='sepsis':
+        start = pd.to_datetime(sep_data[sep_data["encounter_id"].astype("int64")==hadm_id]["Sepsis_Time"].values,utc=False)[0]
+    elif start_timepoint=='sepsis_icu':
+        start = max(pd.to_datetime(sep_data[sep_data["encounter_id"].astype("int64")==hadm_id]["Sepsis_Time"].values,utc=False)[0],min(lab_hadm[lab_hadm["label"]=='SOFA']["time_measured"]))
+    elif start_timepoint=="icu":
+        if stay is None:
+            start = min(lab_demo["icu_intime"][lab_demo["hadm_id"]==hadm_id])
+        else:
+            start = min(icu_hadm["icu_intime"])
+    elif start_timepoint=='admission':
+        start = min(lab_demo["admittime"][lab_demo["hadm_id"]==hadm_id])
     lab_hadm[timetype]=lab_hadm[timetype]-start
     
-    if dataset=='mimic-iv':
-        if round_time:
-            lab_hadm = round_time_func(lab_hadm, round_minutes)
+    if round_time:
+        lab_hadm = round_time_func(lab_hadm, round_minutes)
     
-        #aggregation of startvalues
-        if aggregate_startvalues:
-            lab_hadm = aggregate_startvalues_func(lab_hadm, start_hours)
-        if remove_unaggregated_values:
-            lab_hadm=lab_hadm[(lab_hadm["time_measured"] >= np.timedelta64(0,'h'))]
-            if max_time is not None:
-                lab_hadm=lab_hadm[(lab_hadm["time_measured"] <= np.timedelta64(max_time,'h'))]
-            
-        lab_hadm["time_measured"] = lab_hadm["time_measured"].map(to_hours)
-        if round_nearest:
-            lab_hadm["time_measured"] = lab_hadm["time_measured"].apply(lambda x: round_nearest_func(x, a=round_minutes/60))
-    
-    elif dataset=='amsterdamumcdb':
-        if aggregate_startvalues and remove_unaggregated_values:
-            lab_hadm=lab_hadm[lab_hadm[timetype]>=(-int(start_hours))]
-            lab_hadm.loc[[i <= 0 for i in lab_hadm[timetype]],timetype]=0
+    #aggregation of startvalues
+    if aggregate_startvalues:
+        lab_hadm = aggregate_startvalues_func(lab_hadm, start_hours)
+    if remove_unaggregated_values:
+        lab_hadm=lab_hadm[(lab_hadm["time_measured"] >= np.timedelta64(0,'h'))]
         if max_time is not None:
-            lab_hadm=lab_hadm[(lab_hadm[timetype] <= max_time)]
-
-        # Problem ist der Index von lab hadm!, startet nicht bei 0
+            lab_hadm=lab_hadm[(lab_hadm["time_measured"] <= np.timedelta64(max_time,'h'))]
+        
+    lab_hadm["time_measured"] = lab_hadm["time_measured"].map(to_hours)
+    if round_nearest:
+        lab_hadm["time_measured"] = lab_hadm["time_measured"].apply(lambda x: round_nearest_func(x, a=round_minutes/60))
+    
     lab_hadm_old=lab_hadm.copy()
-    
     lab_hadm=lab_hadm.pivot_table(index=timetype,columns="label",values="value")
-    new_index = range(int(lab_hadm.index[-1]) + 1)
-    lab_hadm = lab_hadm.reindex(new_index, fill_value=np.nan)
-    
-
     if lab_hadm.empty:
-        #return None, None, None
-        a=0
+        return None, None, None
     else:
         lab_hadm=lab_hadm.reindex(index=range(int(min(lab_hadm.index)),int(max(lab_hadm.index))+1))
-    if "CRT" in variables_list and "CRT" in lab_hadm_old.keys() and dataset=='mimic-iv':
+    if "CRT" in variables_list and "CRT" in lab_hadm_old.keys():
         CRT = lab_hadm_old.pivot_table(index=timetype,columns="label",values="value",aggfunc=max)["CRT"]
         CRT=CRT.reindex(index=range(int(min(lab_hadm.index)),int(max(lab_hadm.index))+1))
         lab_hadm["CRT"]=CRT
-    if "SOFA" in variables_list and dataset=='amsterdamumcdb':
-        sofa_hadm = sofa_amsterdam[sofa_amsterdam['admissionid']==hadm_id]
-        sofa_hadm[timetype]=sofa_hadm[timetype]-start
-        if remove_unaggregated_values:
-            sofa_hadm=sofa_hadm[sofa_hadm[timetype]>=0]
-            #sofa_hadm.loc[[i <= 0 for i in sofa_hadm[timetype]],timetype]=0
-        if max_time is not None:
-            sofa_hadm=sofa_hadm[(sofa_hadm[timetype] <= max_time)]
-        
-        # SOFA-Score sollte gecuttet werden wegen ricu package, daher folgende Variante
-        sofa_hadm.index=range(0,len(sofa_hadm))
-        lab_hadm['SOFA']=sofa_hadm['sofa']
-    elif "SOFA" in variables_list and dataset=='mimic-iv':
+    if "SOFA" in variables_list:
         def nearest(items, pivot):
             return min(items, key=lambda x: abs(x - pivot))
         lab_SOFA=[]
@@ -1827,7 +1810,6 @@ def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time
             time=nearest(lab_hadm_SOFA["time_measured"],i)
             lab_SOFA.append(lab_hadm_SOFA[lab_hadm_SOFA["time_measured"]==time]["value"].iloc[0])
         lab_hadm["SOFA"]=lab_SOFA
-    
     
     for i in variables_list:
         if i not in lab_hadm.keys():
@@ -1845,104 +1827,48 @@ def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time
                 static_ant = np.zeros(shape=[len(antibiotics_variables)])
                 
                 pres_hadm_bin = pres_hadm.copy()
-                if dataset=='mimic-iv':
-                    pres_hadm_bin = pres_hadm_bin.sort_values("stoptime",ascending=False)
-                    for i in range(len(antibiotics_variables)):
-                        pres_hadm_bin_ant = pres_hadm_bin[pres_hadm_bin["label"]==antibiotics_variables[i]]
-                        helpval=np.nan
-                        for j in range(pres_hadm_bin_ant.shape[0]):
-                            a=pres_hadm_bin_ant.iloc[j]["starttime"]-start
-                            a=int(np.round(to_hours(a)))
-                            b=pres_hadm_bin_ant.iloc[j]["stoptime"]-start
-                            b=int(np.round(to_hours(b)))
-                            if a < 0 and b>-12:
-                                helpval=a
-                            if not np.isnan(helpval) and b>helpval-12 and a < helpval:
-                                helpval=a
-                        if not np.isnan(helpval):
-                            static_ant[i] = helpval
-                elif dataset=='amsterdamumcdb':
-                    pres_hadm_bin['start'] = pres_hadm_bin['start']-start
-                    pres_hadm_bin = pres_hadm_bin.sort_values("start",ascending=False)
-                    for i in range(len(antibiotics_variables)):
-                        pres_hadm_bin_ant = pres_hadm_bin[pres_hadm_bin["label"]==antibiotics_variables[i]]
-                        helpval=np.nan
-                        for j in range(pres_hadm_bin_ant.shape[0]):
-                            a=pres_hadm_bin_ant.iloc[j]["start"]
-                            if (a < 0 and a>-56 and (np.isnan(helpval)) or (a<helpval and a>helpval-56)):
-                                helpval=a
-                        if not np.isnan(helpval):
-                            static_ant[i] = helpval
+                pres_hadm_bin = pres_hadm_bin.sort_values("stoptime",ascending=False)
+                for i in range(len(antibiotics_variables)):
+                    pres_hadm_bin_ant = pres_hadm_bin[pres_hadm_bin["label"]==antibiotics_variables[i]]
+                    helpval=np.nan
+                    for j in range(pres_hadm_bin_ant.shape[0]):
+                        a=pres_hadm_bin_ant.iloc[j]["starttime"]-start
+                        a=int(np.round(to_hours(a)))
+                        b=pres_hadm_bin_ant.iloc[j]["stoptime"]-start
+                        b=int(np.round(to_hours(b)))
+                        if a < 0 and b>-12:
+                            helpval=a
+                        if not np.isnan(helpval) and b>helpval-12 and a < helpval:
+                            helpval=a
+                    if not np.isnan(helpval):
+                        static_ant[i] = helpval
 
             else:
                 static_ant=None
             
                 
-            if dataset=='mimic-iv':
-                for i in range(pres_hadm.shape[0]):
-                    index = antibiotics_variables.index(pres_hadm.iloc[i]["label"])
-                    a=pres_hadm.iloc[i]["starttime"]-start
-                    a=int(np.round(to_hours(a)))
-                    if a<0:
-                        a=0
-                    b=pres_hadm.iloc[i]["stoptime"]-start
-                    b=int(np.round(to_hours(b)))
-                    if b>0:
-                        antibiotics_array[a:b,index]=1
-                    
-                    #if there is a pause of <12h in between two prescriptions, then setting prescriptions to 1
-                    for j in range(antibiotics_array.shape[1]):
-                        q=np.where(antibiotics_array[:,j]==1)
-                        dq = np.diff(q[0])-1
-                        for k in range(dq.shape[0]):
-                            if dq[k]>0 and dq[k]<12:
-                                antibiotics_array[q[0][k]:q[0][k+1],j]=1
-            
-            elif dataset=='amsterdamumcdb':
-                for i in range(len(antibiotics_variables)):
-                    #index = antibiotics_variables.index(pres_hadm.iloc[i]["label"])
-                    
-                    ab_i = pres_hadm[pres_hadm['label']==antibiotics_variables[i]]                
-                    ab_i = ab_i.sort_values('start',ascending=True)
-    
-                    
-                    list_dist_tp = []
-                    if len(ab_i['start'])>1:
-                        
-                        #first TP
-                        a=int(min(ab_i['start']))
-                        #last TP
-                        b=int(max(ab_i['start']))
-                        antibiotics_array[a:b,i]=1
-                        
-                        # Computing average distance between treatments
-                        for j in range(len(ab_i['start'])-1):
-                            if ab_i.iloc[j+1]['start']-ab_i.iloc[j]['start']<=48:
-                                # das muss aber noch irgendwie halbiert werden oder "normal" extrapoliert
-                                list_dist_tp.append(ab_i.iloc[j+1]['start']-ab_i.iloc[j]['start'])        
-                        mean_dist_tp = np.mean(list_dist_tp)
-                        
-                        # Searching for gaps in between the treatments
-                        for j in range(len(ab_i['start'])-1):
-                            if ab_i.iloc[j+1]['start']-ab_i.iloc[j]['start']>48:
-                                # Erst auf 0 setzen, nachdem die Wirkung der ersten Behandlung wieder abgeklungen ist
-                                antibiotics_array[int(np.round(ab_i.iloc[j]['start']+mean_dist_tp)):int(ab_i.iloc[j+1]['start']),i]=0
-                        
-                        # "extrapolation" after the last treatment
-                        antibiotics_array[b:b+int(mean_dist_tp),i]=1
-                                
-                    elif len(ab_i['start'])==1:
-                        # Difficult if only one value is available....
-                        # Maybe extrapolating 24 hours?? 
-                        # Eigentlich PK/PD Modell und abhängig vom jeweiligen AB
-                        
-                        a=int(min(ab_i['start']))
-                        antibiotics_array[a:a+24,i]=1
+            for i in range(pres_hadm.shape[0]):
+                index = antibiotics_variables.index(pres_hadm.iloc[i]["label"])
+                a=pres_hadm.iloc[i]["starttime"]-start
+                a=int(np.round(to_hours(a)))
+                if a<0:
+                    a=0
+                b=pres_hadm.iloc[i]["stoptime"]-start
+                b=int(np.round(to_hours(b)))
+                if b>0:
+                    antibiotics_array[a:b,index]=1
+                
+                #if there is a pause of <12h in between two prescriptions, then setting prescriptions to 1
+                for j in range(antibiotics_array.shape[1]):
+                    q=np.where(antibiotics_array[:,j]==1)
+                    dq = np.diff(q[0])-1
+                    for k in range(dq.shape[0]):
+                        if dq[k]>0 and dq[k]<12:
+                            antibiotics_array[q[0][k]:q[0][k+1],j]=1
                 
             if remove_noant and (antibiotics_array==0).all():
-                #return None,None,None
-                a=0
-                
+                return None,None,None
+            
             variables_list=variables_list+antibiotics_variables
             
             antibiotics_pd=pd.DataFrame(antibiotics_array,columns=antibiotics_variables)
@@ -1990,16 +1916,6 @@ def one_patient_to_tensor(lab_df, index=0, hadm_id=None, thresh=None, round_time
         lab_hadm = pd.concat([lab_hadm,mask_df],axis=1)
         
     lab_hadm = lab_hadm.reset_index()
-    
-    if dataset=='amsterdamumcdb' and cut =='antibiotics':
-    #ab_data = lab_hadm[['Vancomycine','Piperacilline (Pipcil)', 'Ceftriaxon (Rocephin)']]
-    
-        if not (antibiotics_array==0).all():
-    
-            cut_index = int(np.nanmax([np.max(lab_hadm.index[lab_hadm['Ceftriaxon (Rocephin)']==1]),np.max(lab_hadm.index[lab_hadm['Piperacilline (Pipcil)']==1]),np.max(lab_hadm.index[lab_hadm['Vancomycine']==1])]))
-    
-            lab_hadm = lab_hadm[:cut_index+1]
-    
     return lab_hadm, variables_list, static_ant
 
 def one_patient_mean_per_hour(lab_df, index=None, hadm_id=None, round_nearest=True, round_minutes=60, aggregate_startvalues=True, remove_unaggregated_values=False, max_time=None, start_hours=0.5, start_timepoint='sepsis', sep_data=None, lab_demo=None, variables=None, just_icu=False, icustays=None, stay=None):
@@ -2123,12 +2039,11 @@ def multiple_patients_mean(lab_df, hadm_ids=None, round_nearest=True, round_minu
 
 
 
-def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0,max_pred=None, pred_times_in_h=1, thresh=0.5, round_time=False, round_nearest=True, round_minutes=15, aggregate_startvalues=False, start_hours=None, remove_unaggregated_values=False, timetype="time_measured", start_timepoint='sepsis', missing_mask=True, sep_data=None, lab_demo=None, list_of_hadms=None,first_adms=None,variables=None,print_=False,just_icu=False, icustays=None, stays_list=None, missing_imputation_start=True,antibiotics=None, remove_noant=False, static=None, static_time=False, standardize=False, train_test_split=False, seed=None,antibiotics_variables=None,binary_antibiotics=False,static_bin_ant=False,cut = None,variables_mean_pre=None,variables_std_pre=None,static_mean_pre=None,static_std_pre=None,fit = None,sofa_amsterdam = None):
-    # pred_times_in_h: Intervals where predictions are performed in hours (due to exploding memory usage due to interpolation scheme of Neural CDEs), default: 1h
-    # lab_df: DataFrame containing all covariables
-    # dataset: Variable indicateing whether 'mimic-iv' or 'amsterdamumcdb is used, default: 'mimic-iv'
+def multiple_patients_predictions_tensor(lab_df, min_pred=0,max_pred=None, pred_times_in_h=1, thresh=0.5, round_time=False, round_nearest=True, round_minutes=15, aggregate_startvalues=False, start_hours=None, remove_unaggregated_values=False, timetype="time_measured", start_timepoint='sepsis', missing_mask=True, sep_data=None, lab_demo=None, list_of_hadms=None,first_adms=None,variables=None,print_=False,just_icu=False, icustays=None, stays_list=None, missing_imputation_start=True,antibiotics=None, remove_noant=False, static=None, static_time=False, standardize=False, train_test_split=False, seed=None,antibiotics_variables=None,binary_antibiotics=False,static_bin_ant=False):
     # min_pred: Start timepoint for predictions, default: 0 (offset is mean)
     # max_pred: Endpoint for predictions (reducing memory usage), default: None
+    # pred_times_in_h: Intervals where predictions are performed in hours (due to exploding memory usage due to interpolation scheme of Neural CDEs), default: 1h
+    # lab_df: DataFrame containing all covariables
     # thresh: Threshold describing the maximum allowed percentage of missing values; otherwise, variables will be removed. Default: None
     # sep_data: DataFrame including SOFA-Scores and Sepsis onset
     # round_time: Rounding to real hours (not needed for the Mimic data), default: False
@@ -2156,11 +2071,6 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
     # antibiotics_variables: Strings containing the Antibiotic variables
     # binary_antibiotics: Boolean, whether to model the Antibiotics binary based on prescriptions or model the administrations itself, default: True
     # static_bin_ant: Boolean, whether the administration time of the Antibiotics before Sepsis onset should be considered or not, default: True
-    # cut: Optional, If it is set to 'Antibiotics', then the dataframe is cutted (for amsterdamumcdb)
-    # variables_mean_pre and variables_std_pre: Optional, Lists containing all predefined means and standard deviations used for standardization of the dynamic variables
-    # static_mean and static_std: Optional, Lists containing all predefined means and standard deviations used for standardization of the static variables
-    # fit: Optional, Fitted knn_imputer object 
-    # sofa_amsterdam: Optional, pandas dataframe containing hourly sofa scores of amsterdam umcdb dataset, columns: 'admissionid','measuredat','sofa' default None
     
     #returning: 
     # final: Tensor containing all dynamic variables (including time on the first channel, antibiotics, and missing masks) for OptAB, size: batch x timepoints x variables
@@ -2186,7 +2096,7 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
         for i in list_of_hadms:
             if print_:
                 print(i)
-            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=None, hadm_id=i, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, start_hours=start_hours, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant,dataset=dataset,cut=cut,sofa_amsterdam=sofa_amsterdam,timetype=timetype)
+            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=None, hadm_id=i, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, start_hours=start_hours, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant)
             if te is not None:
                 variables_ = list(_)
                 variables_complete = list(te.keys())
@@ -2199,7 +2109,7 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
         for i in range(first_adms):
             if print_:
                 print(i)
-            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=i, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, start_hours=start_hours, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant,dataset=dataset,cut=cut,sofa_amsterdam=sofa_amsterdam,timetype=timetype)
+            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=i, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, start_hours=start_hours, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant)
             if te is not None:
                 variables_ = list(_)
                 variables_complete = list(te.keys())
@@ -2212,7 +2122,7 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
         for i in stays_list:
             if print_:
                 print(i)
-            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=None,hadm_id=None, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_hours=start_hours, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant,dataset=dataset,cut=cut,sofa_amsterdam=sofa_amsterdam,timetype=timetype)
+            te,_,s = one_patient_to_tensor(lab_df, thresh=thresh, sep_data=sep_data, index=None,hadm_id=None, round_time=round_time, round_nearest=round_nearest, round_minutes=round_minutes, aggregate_startvalues=aggregate_startvalues, remove_unaggregated_values=remove_unaggregated_values, max_time=max_pred, start_hours=start_hours, start_timepoint=start_timepoint, lab_demo=lab_demo, variables=variables, just_icu=just_icu,icustays=icustays, stay=i, antibiotics=antibiotics, remove_noant=remove_noant,antibiotics_variables=antibiotics_variables,binary_antibiotics=binary_antibiotics,static_bin_ant=static_bin_ant)
             if te is not None:
                 variables_ = list(_)
                 variables_complete = list(te.keys())
@@ -2236,46 +2146,27 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
     
     #preprocessing of static variables with the prep static var function
     if static is not None:
-        static_list, static_keys = prep_static_var(static=static,stays_list=complete_stay_list,static_ant_list=static_ant_list,antibiotics_variables=antibiotics_variables,missing_mask=missing_mask,dataset=dataset)
-
+        static_list, static_keys = prep_static_var(static=static,stays_list=complete_stay_list,static_ant_list=static_ant_list,antibiotics_variables=antibiotics_variables,missing_mask=missing_mask)
+    
     #missing value imputation
     if missing_imputation_start:
-        if fit is None:
-            from sklearn.impute import KNNImputer
-            first_tp = [i[0,1:len(variables_)+1] for i in list_nottransformed]
-            first_tp=pd.DataFrame(first_tp,columns=[variables_complete[1:len(variables_)+1]])
-            if static is not None:
-                static_df = pd.DataFrame(static_list)
-                first_tp[list(static_keys)] = static_df
-            imputer = KNNImputer()
-            if train_test_split:
-                np.random.seed(seed)
-                indices_train = np.random.choice(a=list(range(first_tp.shape[0])),size=int(first_tp.shape[0]*0.8),replace=False)
-                indices_test = [i for i in list(range(first_tp.shape[0])) if i not in indices_train]
-                fit = imputer.fit(first_tp.iloc[indices_train])
-            else:
-                indices_train=None
-                indices_test=None            
-                fit = imputer.fit(first_tp)
-            first_tp2 = fit.transform(first_tp)
-        elif fit is not None and dataset=='amsterdamumcdb':
-        
-            first_tp = [i[0,1:len(variables_)+1] for i in list_nottransformed]
-            first_tp=pd.DataFrame(first_tp,columns=[variables_complete[1:len(variables_)+1]])
-            if static is not None:
-                static_list = [i[0] for i in static_list]
-                static_df = pd.DataFrame(static_list)
-                first_tp[list(static_keys)] = static_df
-            
-            if train_test_split:
-                np.random.seed(seed)
-                indices_train = np.random.choice(a=list(range(first_tp.shape[0])),size=int(first_tp.shape[0]*0.8),replace=False)
-                indices_test = [i for i in list(range(first_tp.shape[0])) if i not in indices_train]
-            else:
-                indices_train=None
-                indices_test=None    
-            
-            first_tp2 = fit.transform(first_tp)
+        from sklearn.impute import KNNImputer
+        first_tp = [i[0,1:len(variables_)+1] for i in list_nottransformed]
+        first_tp=pd.DataFrame(first_tp,columns=[variables_complete[1:len(variables_)+1]])
+        if static is not None:
+            static_df = pd.DataFrame(static_list)
+            first_tp[list(static_keys)] = static_df
+        imputer = KNNImputer()
+        if train_test_split:
+            np.random.seed(seed)
+            indices_train = np.random.choice(a=list(range(first_tp.shape[0])),size=int(first_tp.shape[0]*0.8),replace=False)
+            indices_test = [i for i in list(range(first_tp.shape[0])) if i not in indices_train]
+            fit = imputer.fit(first_tp.iloc[indices_train])
+        else:
+            indices_train=None
+            indices_test=None            
+            fit = imputer.fit(first_tp)
+        first_tp2 = fit.transform(first_tp)
 
         tensor_list=[]
         tensor_static_list=[]
@@ -2350,20 +2241,13 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
     if static is not None:
         tensor_static=torch.stack(tensor_static_list)
         if standardize:
-            if static_mean_pre is None:
-                #if dataset == 'mimic-iv':
-                if train_test_split:
-                    static_mean = tensor_static[indices_train].nanmean(dim=[0])[[i != 'male' and 'mask' not in i for i in static_keys]]
-                    static_std = np.nanstd(tensor_static[indices_train].numpy()[:,[i != 'male' and 'mask' not in i for i in static_keys]],axis=tuple([0]))
-                else:
-                    static_mean = tensor_static.nanmean(dim=[0])[[i != 'male' and 'mask' not in i for i in static_keys]]
-                    static_std = np.nanstd(tensor_static.numpy()[:,[i != 'male' and 'mask' not in i for i in static_keys]],axis=tuple([0]))
-                tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]] = (tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]]-static_mean)/static_std
+            if train_test_split:
+                static_mean = tensor_static[indices_train].nanmean(dim=[0])[[i != 'male' and 'mask' not in i for i in static_keys]]
+                static_std = np.nanstd(tensor_static[indices_train].numpy()[:,[i != 'male' and 'mask' not in i for i in static_keys]],axis=tuple([0]))
             else:
-                static_mean=static_mean_pre
-                static_std = static_std_pre
-                tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]] = (tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]]-static_mean_pre)/static_std_pre
-
+                static_mean = tensor_static.nanmean(dim=[0])[:-1]
+                static_std = np.nanstd(tensor_static.numpy()[:,[i != 'male' and 'mask' not in i for i in static_keys]],axis=tuple([0]))
+            tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]] = (tensor_static[:,[i != 'male' and 'mask' not in i for i in static_keys]]-static_mean)/static_std
     
         if static_time:
             tensor_static=torch.cat([tensor_static,torch.ones(size=[tensor_static.shape[0],tensor_static.shape[1]-sum(['stat' in i for i in static_keys])])],axis=1)[:,None,:]
@@ -2375,127 +2259,56 @@ def multiple_patients_predictions_tensor(lab_df,dataset = 'mimic-iv', min_pred=0
             variables_complete = variables_complete + list(static_keys)
             
         if standardize:    
-            
-            if variables_mean_pre is None:
             #just for next lines
-                if antibiotics_variables is None:
-                    antibiotics_variables=[0]
-                if train_test_split:
-                    variables_mean = final[indices_train].nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
-                    variables_std = np.nanstd(final[indices_train].numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
-                else:
-                    variables_mean = final.nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
-                    variables_std = np.nanstd(final.numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
-                final[:,:,1:len(variables_)+1-len(antibiotics_variables)]=(final[:,:,1:len(variables_)+1-len(antibiotics_variables)]-variables_mean)/variables_std
+            if antibiotics_variables is None:
+                antibiotics_variables=[0]
+            if train_test_split:
+                variables_mean = final[indices_train].nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
+                variables_std = np.nanstd(final[indices_train].numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
             else:
-                variables_mean = variables_mean_pre
-                variables_std = variables_std_pre
-                final[:,:,1:len(variables_)+1-len(antibiotics_variables)]=(final[:,:,1:len(variables_)+1-len(antibiotics_variables)]-variables_mean_pre)/variables_std_pre
-                
+                variables_mean = final.nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
+                variables_std = np.nanstd(final.numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
+            final[:,:,1:len(variables_)+1-len(antibiotics_variables)]=(final[:,:,1:len(variables_)+1-len(antibiotics_variables)]-variables_mean)/variables_std
+            
         return final, key_dict, variables_, variables_complete, complete_stay_list, tensor_static, list(static_keys), fit, variables_mean, variables_std, static_mean, static_std, indices_train, indices_test
     else:
         if standardize:    
-            if variables_mean_pre is None:
-            #just for next lines
-                if antibiotics_variables is None:
-                    antibiotics_variables=[0]
-                if train_test_split:
-                    variables_mean = final[indices_train].nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
-                    variables_std = np.nanstd(final[indices_train].numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
-                else:
-                    variables_mean = final.nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
-                    variables_std = np.nanstd(final.numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
-                final[:,:,1:len(variables_)+1-len(antibiotics_variables)]=(final[:,:,1:len(variables_)+1-len(antibiotics_variables)]-variables_mean)/variables_std
+            if antibiotics_variables is None:
+                antibiotics_variables=[0]
+            if train_test_split:
+                variables_mean = final[indices_train].nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
+                variables_std = np.nanstd(final[indices_train].numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
             else:
-                variables_mean = variables_mean_pre
-                variables_std = variables_std_pre
-                final[:,:,1:len(variables_)+1-len(antibiotics_variables)]=(final[:,:,1:len(variables_)+1-len(antibiotics_variables)]-variables_mean_pre)/variables_std_pre
-                
+                variables_mean = final.nanmean(dim=[0,1])[1:len(variables_)+1-len(antibiotics_variables)]
+                variables_std = np.nanstd(final.numpy()[:,:,1:len(variables_)+1-len(antibiotics_variables)],axis=tuple([0,1]))
             
         return final, key_dict, variables_, variables_complete, complete_stay_list, fit, variables_mean, variables_std, indices_train, indices_test
 
 
-def prep_static_var(static=None,stays_list=None,static_ant_list=None,antibiotics_variables=None,missing_mask=None, static_ind = None,dataset='mimic-iv'):
+def prep_static_var(static=None,stays_list=None,static_ant_list=None,antibiotics_variables=None,missing_mask=None, static_ind = None):
     # helper function for preprocessing of static variables
     
     static_list=[]
     j=0
-    if dataset=='mimic-iv':
-        for i in stays_list:
-            static[static["stay_id"]==i[0]]
-            dat=static[static["stay_id"]==i[0]].iloc[0][["admission_age","height","weight","male"]].to_numpy().astype(np.float32)
-            if missing_mask:
-                dat=np.concatenate([dat,np.isnan(dat)])
-            if static_ant_list is not None and len(static_ant_list)>0:
-                dat=np.concatenate([dat,static_ant_list[j]])
-                j=j+1
-            static_list.append(dat)
-        #static_list=torch.stack(static_list)
+    
+    if static_ind==None:
         static_ind = ["admission_age","height","weight","male"]
-        if missing_mask is not None:
-            a=[s + "_mask" for s in static_ind]
-            static_ind=static_ind+a
-        if antibiotics_variables is not None and static_ant_list is not None and len(static_ant_list)>0:
-            antibiotics_variables = [str(j)+'stat' for j in antibiotics_variables]
-            static_ind = static_ind + antibiotics_variables
-            
-    elif dataset=='amsterdamumcdb':
-        #static["agegroup"].unique()
-        #array(['40-49', '18-39', '50-59', '70-79', '60-69', '80+']
-        static.loc[static["agegroup"]=='18-39','agegroup'] = 28.5
-        static.loc[static["agegroup"]=='40-49','agegroup'] = 44.5
-        static.loc[static["agegroup"]=='50-59','agegroup'] = 54.5
-        static.loc[static["agegroup"]=='60-69','agegroup'] = 64.5
-        static.loc[static["agegroup"]=='70-79','agegroup'] = 74.5
-        static.loc[static["agegroup"]=='80+','agegroup'] = 84.5
-        
-        # Height in centimeters
-        #static["heightgroup"].unique()
-        #array(['159-', '170-179', '190+', nan, '180-189', '160-169']
-        static.loc[static["heightgroup"]=='159-','heightgroup'] = 154.5
-        static.loc[static["heightgroup"]=='160-169','heightgroup'] = 164.5
-        static.loc[static["heightgroup"]=='170-179','heightgroup'] = 174.5
-        static.loc[static["heightgroup"]=='180-189','heightgroup'] = 184.5
-        static.loc[static["heightgroup"]=='190+','heightgroup'] = 194.5
-        
-        #static["weightgroup"].unique()
-        #['59-', '60-69', '90-99', nan, '80-89', '70-79', '100-109', '110+']
-        static.loc[static["weightgroup"]=='59-','weightgroup'] = 55.5
-        static.loc[static["weightgroup"]=='60-69','weightgroup'] = 65.5
-        static.loc[static["weightgroup"]=='70-79','weightgroup'] = 75.5
-        static.loc[static["weightgroup"]=='80-89','weightgroup'] = 85.5
-        static.loc[static["weightgroup"]=='90-99','weightgroup'] = 95.5
-        static.loc[static["weightgroup"]=='100-109','weightgroup'] = 105.5
-        static.loc[static["weightgroup"]=='110+','weightgroup'] = 115.5
-        
-        static.loc[static["gender"]=='Vrouw','gender'] = 0
-        static.loc[static["gender"]=='Man','gender'] = 1
-        
-        for i in stays_list:
-            static[static['admissionid']==i]
-            
-            # Static variables preprocessing necessary (agegroup, gender, weightgroup and heightgroup)
-            
-            #Check conversion to float!
-            dat=static[static['admissionid']==i][["agegroup","heightgroup","weightgroup","gender"]].to_numpy().astype(np.float32)
-            
-            if missing_mask:
-                dat=np.concatenate([dat,np.isnan(dat)],axis=1)
-            #j corresponds to index of the static list similar to i in range(len(stays_list))etc.
-            if static_ant_list is not None and len(static_ant_list)>0:
-                dat=np.concatenate([dat,np.expand_dims(static_ant_list[j],0)],axis=1)
-                j=j+1
-            static_list.append(dat)
-        #static_list=torch.stack(static_list)
-        static_ind = ["admission_age","height","weight","male"]
-        if missing_mask is not None:
-            a=[s + "_mask" for s in static_ind]
-            static_ind=static_ind+a
-        if antibiotics_variables is not None and static_ant_list is not None and len(static_ant_list)>0:
-            antibiotics_variables = [str(j)+'stat' for j in antibiotics_variables]
-            static_ind = static_ind + antibiotics_variables
-        #return static_list, static_ind
-
+    
+    for i in stays_list:
+        static[static["stay_id"]==i[0]]
+        dat=static[static["stay_id"]==i[0]].iloc[0][static_ind].to_numpy().astype(np.float32)
+        if missing_mask:
+            dat=np.concatenate([dat,np.isnan(dat)])
+        if static_ant_list is not None and len(static_ant_list)>0:
+            dat=np.concatenate([dat,static_ant_list[j]])
+            j=j+1
+        static_list.append(dat)
+    if missing_mask is not None:
+        a=[s + "_mask" for s in static_ind]
+        static_ind=static_ind+a
+    if antibiotics_variables is not None and static_ant_list is not None and len(static_ant_list)>0:
+        antibiotics_variables = [str(j)+'stat' for j in antibiotics_variables]
+        static_ind = static_ind + antibiotics_variables
     return static_list, static_ind
 
 def multiple_patients_creatinine_preproc(lab_df, start_hours=None, timetype="time_measured", start_timepoint='sepsis', sep_data=None, lab_demo=None,just_icu=False, icustays=None, stays_list=None):
