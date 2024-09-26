@@ -242,33 +242,33 @@ for i in range(len(best_treat_int_list_all)):
     list_nearest_distances_sametrt.append(nearest_distance)
     
 i=0
-mae = np.zeros((len(list_nearest_indices),48),)
-mae[:] = np.nan
+mae_fac = np.zeros((len(list_nearest_indices),48),)
+mae_fac[:] = np.nan
 
 for i in range(len(list_nearest_indices_sametrt)):
     if pd.notna(list_nearest_indices_sametrt[i]):# and list_nearest_distances[i]<1:
         k=np.abs(((data_X_test[i,opt_time_list_all[i][0]:opt_time_list_all[i][0]+48,0])*variables_std[0]+variables_mean[0]).detach().numpy()-((data_X_test[list_nearest_indices_sametrt[i],opt_time_list_all[list_nearest_indices_sametrt[i]][0]:opt_time_list_all[list_nearest_indices_sametrt[i]][0]+48,0])*variables_std[0]+variables_mean[0]).detach().numpy())
         
-        mae[i] =k
+        mae_fac[i] =k
         
-x=mae        
-a=np.nanmean(x,axis=0)
+x_fac=mae_fac        
+a_fac=np.nanmean(x_fac,axis=0)
         
-x_se = list(sem(x,axis=0,nan_policy='omit'))
+x_se_fac = list(sem(x_fac,axis=0,nan_policy='omit'))
 
-quantile = []
-n = np.sum(pd.notna(x),axis=0)
-for i in range(x.shape[1]):
-    quantile.append(t.ppf(0.975,n[i]))
+quantile_fac = []
+n_fac = np.sum(pd.notna(x_fac),axis=0)
+for i in range(x_fac.shape[1]):
+    quantile_fac.append(t.ppf(0.975,n[i]))
 
-ci_upper = a + quantile * (x_se/np.sqrt(n))
-ci_lower = a - quantile * (x_se/np.sqrt(n))
+ci_upper_fac = a_fac + quantile_fac * (x_se_fac/np.sqrt(n_fac))
+ci_lower_fac = a_fac - quantile_fac * (x_se_fac/np.sqrt(n_fac))
 
-ci = quantile * (x_se/np.sqrt(n))
+ci_fac = quantile_fac * (x_se_fac/np.sqrt(n_fac))
 
 fig,ax=plt.subplots(figsize=(5.5,5.5),dpi=600)
-plt.errorbar(list(range(x.shape[1])),a,yerr=ci,color='red',linestyle='',capsize=2,capthick=1,label='95 % CI')
-plt.plot(list(range(x.shape[1])),a,color='black')
+plt.errorbar(list(range(x_fac.shape[1])),a_fac,yerr=ci_fac,color='red',linestyle='',capsize=2,capthick=1,label='95 % CI')
+plt.plot(list(range(x_fac.shape[1])),a_fac,color='black')
 
 plt.ylim(0,3.5)
 plt.xticks(fontsize=12)
@@ -279,3 +279,19 @@ plt.legend()
 plt.ylabel("MAE | matched SOFA-Scores |",fontsize=16)
 
 plt.savefig('C:/Users/wendland/Documents/GitHub/TE-CDE-main/matched_SOFA_Score_factual.png')
+
+fig,ax=plt.subplots(figsize=(5.5,5.5),dpi=600)
+plt.plot(list(range(x.shape[1])),a,color='black',label='Counterfactual Matching')
+plt.errorbar(list(range(x.shape[1])),a,yerr=ci_fac,color='red',linestyle='',capsize=2,capthick=1)
+
+plt.plot(list(range(x_fac.shape[1])),a_fac,color='dodgerblue',label='Factual Matching')
+plt.errorbar(list(range(x_fac.shape[1])),a_fac,yerr=ci_fac,color='red',linestyle='',capsize=2,capthick=1,label='95 % CI')
+
+plt.ylim(0,3.5)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+plt.xlabel("Time in hours",fontsize=16)
+plt.legend()
+plt.ylabel("MAE | matched SOFA-Scores |",fontsize=16)
+
+plt.savefig('C:/Users/wendland/Documents/GitHub/TE-CDE-main/matched_SOFA_Score_both.png')
